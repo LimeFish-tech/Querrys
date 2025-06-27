@@ -1,0 +1,14 @@
+-- Пример запроса для выявления кандидатов на VACUUM FULL
+SELECT
+  schemaname,
+  relname,
+  pg_size_pretty(pg_total_relation_size(relid)) AS total_size,
+  n_dead_tup AS dead_rows,
+  round(n_dead_tup::numeric / (n_live_tup + n_dead_tup + 1), 2) AS dead_ratio,
+  round(pg_total_relation_size(relid) * 0.3) AS bloat_threshold_bytes
+FROM pg_stat_user_tables
+WHERE 
+  n_dead_tup > 10000  -- Абсолютный минимум мертвых строк
+  AND (n_dead_tup::numeric / (n_live_tup + n_dead_tup + 1)) > 0.25  -- >25% мертвых строк
+  AND pg_total_relation_size(relid) > 1 * 1024^3  -- Таблицы >1GB
+ORDER BY dead_ratio DESC;
