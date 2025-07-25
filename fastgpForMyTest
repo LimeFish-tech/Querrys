@@ -215,3 +215,12 @@ for i in 2 3
 do 
     pgbackrest --stanza=seg$i --type=name --target=backup1 restore
 done
+
+
+
+
+
+
+
+
+# yum install apr apr-util bash bzip2 curl krb5-devel libcgroup-tools libcurl libuuid libevent libxml2 libyaml zlib openldap openssh openssl openssl-libs perl readline rsync R sed tar zip m4 tmux java-1.8.0-openjdk
