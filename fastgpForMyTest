@@ -218,7 +218,8 @@ done
 
 
 
-
+gpconfig -c archive_mode -v on
+gpconfig -c archive_command -v "'PGOPTIONS=\"-c gp_session_role=utility\" /usr/local/bin/pgbackrest --stanza=gpseg%c archive-push %p'" --skipvalidation
 
 
 
