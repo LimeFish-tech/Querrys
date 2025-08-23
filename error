@@ -1,0 +1,16 @@
+20250823:13:55:46:025173 gpstart:gptest-master1:gpadmin-[INFO]:-Starting gpstart with args: -am
+20250823:13:55:46:025173 gpstart:gptest-master1:gpadmin-[INFO]:-Gathering information and validating the environment...
+20250823:13:55:46:025173 gpstart:gptest-master1:gpadmin-[INFO]:-Greenplum Binary Version: 'postgres (Greenplum Database) 6.25.3-p2 build commit:0960f0e9cc2e87fe8d966bf210437c16b24ffa6d'
+20250823:13:55:46:025173 gpstart:gptest-master1:gpadmin-[INFO]:-Greenplum Catalog Version: '301908232'
+20250823:13:55:46:025173 gpstart:gptest-master1:gpadmin-[WARNING]:-****************************************************************************
+20250823:13:55:46:025173 gpstart:gptest-master1:gpadmin-[WARNING]:-Master-only start requested. If a standby master is configured, this command
+20250823:13:55:46:025173 gpstart:gptest-master1:gpadmin-[WARNING]:-may lead to a split-brain condition and possible unrecoverable data loss.
+20250823:13:55:46:025173 gpstart:gptest-master1:gpadmin-[WARNING]:-Maintenance mode should only be used with direction from Greenplum Support.
+20250823:13:55:46:025173 gpstart:gptest-master1:gpadmin-[WARNING]:-****************************************************************************
+20250823:13:55:46:025173 gpstart:gptest-master1:gpadmin-[INFO]:-Starting Master instance in admin mode
+20250823:13:55:47:025173 gpstart:gptest-master1:gpadmin-[CRITICAL]:-Failed to start Master instance in admin mode
+20250823:13:55:47:025173 gpstart:gptest-master1:gpadmin-[CRITICAL]:-Error occurred: non-zero rc: 1
+ Command was: 'env GPSESSID=0000000000 GPERA=None $GPHOME/bin/pg_ctl -D /data/master/gpseg-1 -l /data/master/gpseg-1/pg_log/startup.log -w -t 600 -o " -p 5432 -c gp_role=utility " start'
+rc=1, stdout='waiting for server to start.... stopped waiting
+', stderr='pg_ctl: could not start server
+Examine the log output.
