@@ -14,3 +14,30 @@
 rc=1, stdout='waiting for server to start.... stopped waiting
 ', stderr='pg_ctl: could not start server
 Examine the log output.
+
+
+
+
+2025-08-23 13:53:17.412088 MSK,,,p25164,th1900368512,,,,0,,,seg-1,,,,,"FATAL","58P01","could not access file ""libgreenplum.metric.hook"": No such file or directory",,,,,,,,"internal_load_library","dfmgr.c",202,1    0xbdfbbf postgres errstart (elog.c:567)
+2    0xbe4ffd postgres <symbol not found> (dfmgr.c:199)
+3    0xbe56a4 postgres load_file (dfmgr.c:156)
+4    0xbef65a postgres <symbol not found> (miscinit.c:1384)
+5    0xbf07be postgres process_shared_preload_libraries (miscinit.c:1405)
+6    0xa1f407 postgres PostmasterMain (postmaster.c:1151)
+7    0x6e084b postgres main (main.c:178)
+8    0x7fa36dc2d7e5 libc.so.6 __libc_start_main + 0xe5
+9    0x6ec62e postgres _start + 0x2e
+
+2025-08-23 10:55:46.999045 GMT,,,p25183,th-1480277376,,,,0,,,seg-1,,,,,"LOG","00000","gpdb dir for cgroup component ""cpu"": /sys/fs/cgroup/cpu/gpdb/",,,,,,,,"dumpCompDirs","resgroup-ops-linux.c",472,
+2025-08-23 10:55:46.999118 GMT,,,p25183,th-1480277376,,,,0,,,seg-1,,,,,"LOG","00000","gpdb dir for cgroup component ""cpuacct"": /sys/fs/cgroup/cpuacct/gpdb/",,,,,,,,"dumpCompDirs","resgroup-ops-linux.c",472,
+2025-08-23 10:55:46.999152 GMT,,,p25183,th-1480277376,,,,0,,,seg-1,,,,,"LOG","00000","gpdb dir for cgroup component ""memory"": /sys/fs/cgroup/memory/gpdb/",,,,,,,,"dumpCompDirs","resgroup-ops-linux.c",472,
+2025-08-23 10:55:46.999185 GMT,,,p25183,th-1480277376,,,,0,,,seg-1,,,,,"LOG","00000","gpdb dir for cgroup component ""cpuset"": /sys/fs/cgroup/cpuset/gpdb/",,,,,,,,"dumpCompDirs","resgroup-ops-linux.c",472,
+2025-08-23 13:55:47.001691 MSK,,,p25183,th-1480277376,,,,0,,,seg-1,,,,,"FATAL","58P01","could not access file ""libgreenplum.metric.hook"": No such file or directory",,,,,,,,"internal_load_library","dfmgr.c",202,1    0xbdfbbf postgres errstart (elog.c:567)
+2    0xbe4ffd postgres <symbol not found> (dfmgr.c:199)
+3    0xbe56a4 postgres load_file (dfmgr.c:156)
+4    0xbef65a postgres <symbol not found> (miscinit.c:1384)
+5    0xbf07be postgres process_shared_preload_libraries (miscinit.c:1405)
+6    0xa1f407 postgres PostmasterMain (postmaster.c:1151)
+7    0x6e084b postgres main (main.c:178)
+8    0x7f96a44247e5 libc.so.6 __libc_start_main + 0xe5
+9    0x6ec62e postgres _start + 0x2e
