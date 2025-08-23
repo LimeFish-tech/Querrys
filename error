@@ -41,3 +41,17 @@ Examine the log output.
 7    0x6e084b postgres main (main.c:178)
 8    0x7f96a44247e5 libc.so.6 __libc_start_main + 0xe5
 9    0x6ec62e postgres _start + 0x2e
+
+
+
+2025-08-23 11:09:41.134777 GMT,,,p25217,th1263825536,,,,0,,,seg-1,,,,,"LOG","00000","gpdb dir for cgroup component ""cpu"": /sys/fs/cgroup/cpu/gpdb/",,,,,,,,"dumpCompDirs","resgroup-ops-linux.c",472,
+2025-08-23 11:09:41.134889 GMT,,,p25217,th1263825536,,,,0,,,seg-1,,,,,"LOG","00000","gpdb dir for cgroup component ""cpuacct"": /sys/fs/cgroup/cpuacct/gpdb/",,,,,,,,"dumpCompDirs","resgroup-ops-linux.c",472,
+2025-08-23 11:09:41.134952 GMT,,,p25217,th1263825536,,,,0,,,seg-1,,,,,"LOG","00000","gpdb dir for cgroup component ""memory"": /sys/fs/cgroup/memory/gpdb/",,,,,,,,"dumpCompDirs","resgroup-ops-linux.c",472,
+2025-08-23 11:09:41.135014 GMT,,,p25217,th1263825536,,,,0,,,seg-1,,,,,"LOG","00000","gpdb dir for cgroup component ""cpuset"": /sys/fs/cgroup/cpuset/gpdb/",,,,,,,,"dumpCompDirs","resgroup-ops-linux.c",472,
+2025-08-23 14:09:41.903024 MSK,,,p25217,th1263825536,,,,0,,,seg-1,,,,,"LOG","00000","redirecting log output to logging collector process",,"Future log output will appear in directory ""pg_log"".",,,,,,"SysLogger_Start","syslogger.c",999,
+2025-08-23 11:13:48.650523 GMT,,,p25243,th-176754048,,,,0,,,seg-1,,,,,"LOG","00000","gpdb dir for cgroup component ""cpu"": /sys/fs/cgroup/cpu/gpdb/",,,,,,,,"dumpCompDirs","resgroup-ops-linux.c",472,
+2025-08-23 11:13:48.650606 GMT,,,p25243,th-176754048,,,,0,,,seg-1,,,,,"LOG","00000","gpdb dir for cgroup component ""cpuacct"": /sys/fs/cgroup/cpuacct/gpdb/",,,,,,,,"dumpCompDirs","resgroup-ops-linux.c",472,
+2025-08-23 11:13:48.650646 GMT,,,p25243,th-176754048,,,,0,,,seg-1,,,,,"LOG","00000","gpdb dir for cgroup component ""memory"": /sys/fs/cgroup/memory/gpdb/",,,,,,,,"dumpCompDirs","resgroup-ops-linux.c",472,
+2025-08-23 11:13:48.650685 GMT,,,p25243,th-176754048,,,,0,,,seg-1,,,,,"LOG","00000","gpdb dir for cgroup component ""cpuset"": /sys/fs/cgroup/cpuset/gpdb/",,,,,,,,"dumpCompDirs","resgroup-ops-linux.c",472,
+2025-08-23 14:13:49.280325 MSK,,,p25243,th-176754048,,,,0,,,seg-1,,,,,"LOG","00000","redirecting log output to logging collector process",,"Future log output will appear in directory ""pg_log"".",,,,,,"SysLogger_Start","syslogger.c",999,
+
