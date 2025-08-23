@@ -55,3 +55,22 @@ Examine the log output.
 2025-08-23 11:13:48.650685 GMT,,,p25243,th-176754048,,,,0,,,seg-1,,,,,"LOG","00000","gpdb dir for cgroup component ""cpuset"": /sys/fs/cgroup/cpuset/gpdb/",,,,,,,,"dumpCompDirs","resgroup-ops-linux.c",472,
 2025-08-23 14:13:49.280325 MSK,,,p25243,th-176754048,,,,0,,,seg-1,,,,,"LOG","00000","redirecting log output to logging collector process",,"Future log output will appear in directory ""pg_log"".",,,,,,"SysLogger_Start","syslogger.c",999,
 
+2025-08-23 14:13:49.282345 MSK,,,p25245,th-176754048,,,,0,,,seg-1,,,,,"LOG","00000","database system was interrupted; last known up at 2025-08-21 19:24:53 MSK",,,,,,,0,,"xlog.c",6589,
+2025-08-23 14:13:49.282410 MSK,,,p25246,th-176754048,"[local]",,2025-08-23 14:13:49 MSK,0,,,seg-1,,,,,"LOG","00000","connection received: host=[local]",,,,,,,0,,"postmaster.c",4678,
+2025-08-23 14:13:49.282458 MSK,,,p25245,th-176754048,,,,0,,,seg-1,,,,,"LOG","00000","invalid checkpoint record at location 41E/28",,,,,,,0,,"xlog.c",8485,
+2025-08-23 14:13:49.282466 MSK,"gpadmin","postgres",p25246,th-176754048,"[local]",,2025-08-23 14:13:49 MSK,0,,,seg-1,,,,,"FATAL","57P03","the database system is starting up","last replayed record at 0/0",,,,,,0,,"postmaster.c",2571,
+2025-08-23 14:13:49.384219 MSK,,,p25248,th-176754048,"[local]",,2025-08-23 14:13:49 MSK,0,,,seg-1,,,,,"LOG","00000","connection received: host=[local]",,,,,,,0,,"postmaster.c",4678,
+2025-08-23 14:13:49.384261 MSK,"gpadmin","postgres",p25248,th-176754048,"[local]",,2025-08-23 14:13:49 MSK,0,,,seg-1,,,,,"FATAL","57P03","the database system is starting up","last replayed record at 0/0",,,,,,0,,"postmaster.c",2571,
+2025-08-23 14:13:49.412720 MSK,,,p25245,th-176754048,,,,0,,,seg-1,,,,,"FATAL","XX000","could not locate required checkpoint record",,"If you are not restoring from a backup, try removing the file ""/data/master/gpseg-1/backup_label"".",,,,,0,,"xlog.c",6763,"Stack trace:
+1    0xbdfbbf postgres errstart (elog.c:567)
+2    0x774c91 postgres StartupXLOG (xlog.c:6761)
+3    0xa20513 postgres StartupProcessMain (discriminator 2)
+4    0x7ada01 postgres AuxiliaryProcessMain (bootstrap.c:453)
+5    0xa1a76f postgres <symbol not found> (postmaster.c:5774)
+6    0xa1f821 postgres PostmasterMain (discriminator 5)
+7    0x6e084b postgres main (main.c:178)
+8    0x7f35f1f477e5 libc.so.6 __libc_start_main + 0xe5
+9    0x6ec62e postgres _start + 0x2e
+"
+2025-08-23 14:13:49.414268 MSK,,,p25243,th-176754048,,,,0,,,seg-1,,,,,"LOG","00000","startup process (PID 25245) exited with exit code 1",,,,,,,0,,"postmaster.c",3999,
+2025-08-23 14:13:49.414300 MSK,,,p25243,th-176754048,,,,0,,,seg-1,,,,,"LOG","00000","aborting startup due to startup process failure",,,,,,,0,,"postmaster.c",3261,
