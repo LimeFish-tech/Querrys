@@ -23,8 +23,8 @@ echo "$(date): Начало очистки WAL-файлов старше 2 дн�
 
 # Функция для проверки соответствия файлов и их удаления
 clean_old_wal_files() {
-    # Поиск WAL-файлов старше 2 дней в pg_xlog
-    find "$PG_XLOG_DIR" -maxdepth 1 -name "0*" -type f -mtime +2 | while read -r wal_file; do
+    # Поиск WAL-файлов старше 2 дней в pg_xlog, исключаем файлы .history
+    find "$PG_XLOG_DIR" -maxdepth 1 -name "0*" -not -name "*.history" -type f -mtime +2 | while read -r wal_file; do
         wal_filename=$(basename "$wal_file")
         
         # Проверяем, что это WAL-файл (имена начинаются с 0 и содержат только hex-символы)
@@ -67,8 +67,8 @@ clean_old_wal_files() {
 
 # Функция для очистки "осиротевших" файлов статусов (без соответствующих WAL-файлов)
 clean_orphaned_status_files() {
-    # Поиск файлов статусов старше 2 дней
-    find "$ARCHIVE_STATUS_DIR" -maxdepth 1 -name "*.ready" -o -name "*.done" | while read -r status_file; do
+    # Поиск файлов статусов старше 2 дней, исключаем статусы для .history файлов
+    find "$ARCHIVE_STATUS_DIR" -maxdepth 1 \( -name "*.ready" -o -name "*.done" \) -not -name "*.history.ready" -not -name "*.history.done" | while read -r status_file; do
         status_filename=$(basename "$status_file")
         
         # Извлекаем имя WAL-файла из имени статуса (убираем расширение .ready или .done)
@@ -86,7 +86,7 @@ clean_orphaned_status_files() {
     done
 }
 
-# Вызов функций очистки 
+# Выполняем очистку
 echo "Очистка WAL-файлов и соответствующих статусов..." >> "$LOG_FILE"
 clean_old_wal_files
 
