@@ -1,0 +1,97 @@
+#!/bin/bash
+
+#ВНИМАНИЕ! Данный скрипт рекомендуется использовать лишь при ситуации когда размерность pg_xlog достигла крит. отметки. т.е. когда кончается место на диске на котором лежит сегмент. если занято > 70%
+
+# Укажите полные пути к директориям pg_xlog, .../pg_xlog/archive_status
+PG_XLOG_DIR="/data/primary/gpseg23/pg_xlog"    # Изменить на путь к pg_xlog
+ARCHIVE_STATUS_DIR="/data/primary/gpseg23/pg_xlog/archive_status" # Подменить суффикс у gpseg на необходимый
+
+# Проверка существования директорий
+if [ ! -d "$PG_XLOG_DIR" ]; then
+    echo "Ошибка: Директория PG_XLOG $PG_XLOG_DIR не найдена." >&2
+    exit 1
+fi
+
+if [ ! -d "$ARCHIVE_STATUS_DIR" ]; then
+    echo "Ошибка: Директория ARCHIVE_STATUS $ARCHIVE_STATUS_DIR не найдена." >&2
+    exit 1
+fi
+
+# Логирование для валидации результатов
+LOG_FILE="/home/gpadmin/pg_xlog_cleanup.log"
+echo "$(date): Начало очистки WAL-файлов старше 2 дней." >> "$LOG_FILE"
+
+# Функция для проверки соответствия файлов и их удаления
+clean_old_wal_files() {
+    # Поиск WAL-файлов старше 2 дней в pg_xlog
+    find "$PG_XLOG_DIR" -maxdepth 1 -name "0*" -type f -mtime +2 | while read -r wal_file; do
+        wal_filename=$(basename "$wal_file")
+        
+        # Проверяем, что это WAL-файл (имена начинаются с 0 и содержат только hex-символы)
+        if [[ ! "$wal_filename" =~ ^[0-9A-Fa-f]{8,}$ ]]; then
+            continue
+        fi
+        
+        # Определяем соответствующие файлы статусов
+        status_ready="$ARCHIVE_STATUS_DIR/${wal_filename}.ready"
+        status_done="$ARCHIVE_STATUS_DIR/${wal_filename}.done"
+        
+        # Логируем найденные файлы
+        echo "Найден WAL-файл для удаления: $wal_filename" >> "$LOG_FILE"
+        
+        # Удаляем WAL-файл
+        if rm -f "$wal_file"; then
+            echo "Удален WAL-файл: $wal_filename" >> "$LOG_FILE"
+            
+            # Удаляем соответствующие файлы статусов, если они существуют
+            if [ -f "$status_ready" ]; then
+                if rm -f "$status_ready"; then
+                    echo "Удален файл статуса: ${wal_filename}.ready" >> "$LOG_FILE"
+                else
+                    echo "Ошибка удаления ${wal_filename}.ready" >> "$LOG_FILE"
+                fi
+            fi
+            
+            if [ -f "$status_done" ]; then
+                if rm -f "$status_done"; then
+                    echo "Удален файл статуса: ${wal_filename}.done" >> "$LOG_FILE"
+                else
+                    echo "Ошибка удаления ${wal_filename}.done" >> "$LOG_FILE"
+                fi
+            fi
+        else
+            echo "Ошибка удаления WAL-файла: $wal_filename" >> "$LOG_FILE"
+        fi
+    done
+}
+
+# Функция для очистки "осиротевших" файлов статусов (без соответствующих WAL-файлов)
+clean_orphaned_status_files() {
+    # Поиск файлов статусов старше 2 дней
+    find "$ARCHIVE_STATUS_DIR" -maxdepth 1 -name "*.ready" -o -name "*.done" | while read -r status_file; do
+        status_filename=$(basename "$status_file")
+        
+        # Извлекаем имя WAL-файла из имени статуса (убираем расширение .ready или .done)
+        wal_filename="${status_filename%.*}"
+        corresponding_wal="$PG_XLOG_DIR/$wal_filename"
+        
+        # Если соответствующего WAL-файла не существует И файл статуса старше 2 дней
+        if [ ! -f "$corresponding_wal" ] && [ -f "$status_file" ] && [ $(find "$status_file" -mtime +2) ]; then
+            if rm -f "$status_file"; then
+                echo "Удален осиротевший файл статуса: $status_filename" >> "$LOG_FILE"
+            else
+                echo "Ошибка удаления осиротевшего файла: $status_filename" >> "$LOG_FILE"
+            fi
+        fi
+    done
+}
+
+# Вызов функций очистки 
+echo "Очистка WAL-файлов и соответствующих статусов..." >> "$LOG_FILE"
+clean_old_wal_files
+
+echo "Очистка осиротевших файлов статусов..." >> "$LOG_FILE"
+clean_orphaned_status_files
+
+echo "$(date): Очистка завершена." >> "$LOG_FILE"
+echo "Очистка завершена. Лог записан в $LOG_FILE"
