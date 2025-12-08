@@ -1,0 +1,105 @@
+-- Сбор статистики для обычных таблиц (не внешних и не партицированных)
+WITH 
+-- 1. Получаем список всех пользовательских таблиц из pg_tables
+user_tables AS (
+    SELECT 
+        schemaname,
+        tablename,
+        schemaname || '.' || tablename AS full_table_name
+    FROM pg_tables
+    WHERE schemaname NOT IN ('pg_catalog', 'information_schema', 'gp_toolkit')
+),
+-- 2. Исключаем внешние таблицы
+non_external_tables AS (
+    SELECT 
+        ut.*
+    FROM user_tables ut
+    WHERE NOT EXISTS (
+        SELECT 1 FROM pg_exttable e
+        JOIN pg_class c ON c.oid = e.reloid
+        JOIN pg_namespace n ON c.relnamespace = n.oid
+        WHERE n.nspname = ut.schemaname 
+          AND c.relname = ut.tablename
+    )
+),
+-- 3. Исключаем партицированные таблицы (родительские и дочерние)
+non_partitioned_tables AS (
+    SELECT 
+        net.*
+    FROM non_external_tables net
+    WHERE NOT EXISTS (
+        -- Исключаем родительские таблицы (те, у которых есть партиции)
+        SELECT 1 FROM pg_partitions p
+        WHERE p.schemaname = net.schemaname 
+          AND p.tablename = net.tablename
+          AND p.partitiontablename IS NOT NULL
+          AND p.partitiontablename != p.tablename
+    )
+    AND NOT EXISTS (
+        -- Исключаем дочерние партиции
+        SELECT 1 FROM pg_partitions p
+        WHERE p.partitionschemaname = net.schemaname 
+          AND p.partitiontablename = net.tablename
+    )
+),
+-- 4. Собираем статистику со всех сегментов для обычных таблиц
+table_stats AS (
+    SELECT 
+        npt.schemaname,
+        npt.tablename,
+        npt.full_table_name,
+        -- Суммируем статистику по всем сегментам
+        SUM(COALESCE(stat.seq_scan, 0)) AS total_seq_scan,
+        SUM(COALESCE(stat.seq_tup_read, 0)) AS total_seq_tup_read,
+        SUM(COALESCE(stat.idx_scan, 0)) AS total_idx_scan,
+        SUM(COALESCE(stat.idx_tup_fetch, 0)) AS total_idx_tup_fetch,
+        SUM(COALESCE(stat.n_tup_ins, 0)) AS total_n_tup_ins,
+        SUM(COALESCE(stat.n_tup_upd, 0)) AS total_n_tup_upd,
+        SUM(COALESCE(stat.n_tup_del, 0)) AS total_n_tup_del,
+        SUM(COALESCE(stat.n_tup_hot_upd, 0)) AS total_n_tup_hot_upd,
+        SUM(COALESCE(stat.n_live_tup, 0)) AS total_n_live_tup,
+        SUM(COALESCE(stat.n_dead_tup, 0)) AS total_n_dead_tup,
+        SUM(COALESCE(stat.n_mod_since_analyze, 0)) AS total_n_mod_since_analyze,
+        SUM(COALESCE(stat.n_ins_since_vacuum, 0)) AS total_n_ins_since_vacuum,
+        MAX(stat.last_vacuum) AS last_vacuum,
+        MAX(stat.last_autovacuum) AS last_autovacuum,
+        MAX(stat.last_analyze) AS last_analyze,
+        MAX(stat.last_autoanalyze) AS last_autoanalyze,
+        COUNT(DISTINCT stat.gp_segment_id) AS segments_with_stats
+    FROM non_partitioned_tables npt
+    -- Используем gp_dist_random для сбора статистики со всех сегментов
+    LEFT JOIN gp_dist_random('pg_stat_user_tables') stat 
+        ON stat.schemaname = npt.schemaname 
+        AND stat.relname = npt.tablename
+    GROUP BY npt.schemaname, npt.tablename, npt.full_table_name
+)
+-- 5. Выводим результаты
+SELECT 
+    schemaname,
+    tablename,
+    full_table_name,
+    total_seq_scan,
+    total_seq_tup_read,
+    total_idx_scan,
+    total_idx_tup_fetch,
+    total_n_tup_ins,
+    total_n_tup_upd,
+    total_n_tup_del,
+    total_n_tup_hot_upd,
+    total_n_live_tup,
+    total_n_dead_tup,
+    total_n_mod_since_analyze,
+    total_n_ins_since_vacuum,
+    last_vacuum,
+    last_autovacuum,
+    last_analyze,
+    last_autoanalyze,
+    segments_with_stats,
+    CASE 
+        WHEN segments_with_stats = 0 THEN 'No statistics available'
+        WHEN segments_with_stats < (SELECT COUNT(DISTINCT content) FROM gp_segment_configuration WHERE content >= 0) 
+        THEN 'Partial statistics'
+        ELSE 'Full statistics from all segments'
+    END AS statistics_coverage
+FROM table_stats
+ORDER BY schemaname, tablename;
