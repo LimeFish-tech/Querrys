@@ -26,12 +26,7 @@ partition_stats AS (
         SUM(COALESCE(stat.n_tup_hot_upd, 0)) AS total_n_tup_hot_upd,
         SUM(COALESCE(stat.n_live_tup, 0)) AS total_n_live_tup,
         SUM(COALESCE(stat.n_dead_tup, 0)) AS total_n_dead_tup,
-        SUM(COALESCE(stat.n_mod_since_analyze, 0)) AS total_n_mod_since_analyze,
-        SUM(COALESCE(stat.n_ins_since_vacuum, 0)) AS total_n_ins_since_vacuum,
-        SUM(COALESCE(stat.last_vacuum, '1970-01-01'::timestamp)::text != '1970-01-01'::text)::int AS total_vacuum_count,
-        SUM(COALESCE(stat.last_autovacuum, '1970-01-01'::timestamp)::text != '1970-01-01'::text)::int AS total_autovacuum_count,
-        SUM(COALESCE(stat.last_analyze, '1970-01-01'::timestamp)::text != '1970-01-01'::text)::int AS total_analyze_count,
-        SUM(COALESCE(stat.last_autoanalyze, '1970-01-01'::timestamp)::text != '1970-01-01'::text)::int AS total_autoanalyze_count
+        SUM(COALESCE(stat.n_mod_since_analyze, 0)) AS total_n_mod_since_analyze
     FROM partition_hierarchy ph
     -- Используем gp_dist_random для сбора статистики со всех сегментов
     LEFT JOIN gp_dist_random('pg_stat_user_tables') stat 
@@ -43,13 +38,6 @@ partition_stats AS (
 SELECT 
     root_schema,
     root_table,
-    -- Выводим список партиций для каждой родительской таблицы
-    (
-        SELECT string_agg(partition_schema || '.' || partition_name, ', ' ORDER BY partition_schema, partition_name)
-        FROM partition_hierarchy ph2
-        WHERE ph2.root_schema = ps.root_schema 
-            AND ph2.root_table = ps.root_table
-    ) AS partition_list,
     -- Выводим агрегированную статистику
     total_seq_scan,
     total_seq_tup_read,
