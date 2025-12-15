@@ -49,11 +49,6 @@ SELECT
     total_n_tup_hot_upd,
     total_n_live_tup,
     total_n_dead_tup,
-    total_n_mod_since_analyze,
-    total_n_ins_since_vacuum,
-    total_vacuum_count,
-    total_autovacuum_count,
-    total_analyze_count,
-    total_autoanalyze_count
+    total_n_mod_since_analyze
 FROM partition_stats ps
 ORDER BY root_schema, root_table;
