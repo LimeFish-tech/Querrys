@@ -1,5 +1,8 @@
--- 1. Создание таблиц
-CREATE TABLE IF NOT EXISTS partition_stats_history (
+-- Создание схемы dbatools если она не существует
+CREATE SCHEMA IF NOT EXISTS dbatools;
+
+-- 1. Создание таблиц в схеме dbatools
+CREATE TABLE IF NOT EXISTS dbatools.partition_stats_history (
     root_schema TEXT,
     root_table TEXT,
     total_seq_scan BIGINT,
@@ -18,7 +21,7 @@ CREATE TABLE IF NOT EXISTS partition_stats_history (
     PRIMARY KEY (root_schema, root_table, stats_date)
 );
 
-CREATE TABLE IF NOT EXISTS partition_stats_delta (
+CREATE TABLE IF NOT EXISTS dbatools.partition_stats_delta (
     root_schema TEXT,
     root_table TEXT,
     delta_seq_scan BIGINT,
@@ -38,8 +41,8 @@ CREATE TABLE IF NOT EXISTS partition_stats_delta (
     PRIMARY KEY (root_schema, root_table, period_start, period_end)
 );
 
--- 2. Основная функция
-CREATE OR REPLACE FUNCTION gather_partition_stats()
+-- 2. Основная функция в схеме dbatools
+CREATE OR REPLACE FUNCTION dbatools.gather_partition_stats()
 RETURNS void AS $$
 DECLARE
     current_stats_date DATE := CURRENT_DATE;
@@ -77,7 +80,7 @@ BEGIN
             AND stat.relname = ph.partition_name
         GROUP BY ph.root_schema, ph.root_table
     )
-    INSERT INTO partition_stats_history (
+    INSERT INTO dbatools.partition_stats_history (
         root_schema, root_table,
         total_seq_scan, total_seq_tup_read,
         total_idx_scan, total_idx_tup_fetch,
@@ -136,13 +139,13 @@ BEGIN
             cur.total_n_live_tup - COALESCE(prev.total_n_live_tup, 0) as delta_n_live_tup,
             cur.total_n_dead_tup - COALESCE(prev.total_n_dead_tup, 0) as delta_n_dead_tup,
             cur.total_n_mod_since_analyze - COALESCE(prev.total_n_mod_since_analyze, 0) as delta_n_mod_since_analyze
-        FROM partition_stats_history cur
-        LEFT JOIN partition_stats_history prev 
+        FROM dbatools.partition_stats_history cur
+        LEFT JOIN dbatools.partition_stats_history prev 
             ON cur.root_schema = prev.root_schema 
             AND cur.root_table = prev.root_table
             AND prev.stats_date = (
                 SELECT MAX(stats_date) 
-                FROM partition_stats_history 
+                FROM dbatools.partition_stats_history 
                 WHERE root_schema = cur.root_schema 
                     AND root_table = cur.root_table 
                     AND stats_date < cur.stats_date
@@ -150,7 +153,7 @@ BEGIN
         WHERE cur.stats_date = current_stats_date
           AND prev.stats_date IS NOT NULL
     LOOP
-        INSERT INTO partition_stats_delta (
+        INSERT INTO dbatools.partition_stats_delta (
             root_schema, root_table,
             delta_seq_scan, delta_seq_tup_read,
             delta_idx_scan, delta_idx_tup_fetch,
