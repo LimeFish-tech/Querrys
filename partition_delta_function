@@ -1,0 +1,255 @@
+CREATE OR REPLACE FUNCTION gather_partition_stats_func()
+RETURNS VOID AS
+$$
+DECLARE
+    current_stat_date DATE := current_date;
+    stat_row RECORD;
+    prev_row RECORD;
+BEGIN
+    -- 1. Создание таблицы для хранения статистики, если не существует
+    IF NOT EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'partition_stats_history' AND schemaname = 'public') THEN
+        CREATE TABLE public.partition_stats_history (
+            root_schema TEXT,
+            root_table TEXT,
+            stat_date DATE,
+            total_seq_scan BIGINT,
+            total_seq_tup_read BIGINT,
+            total_idx_scan BIGINT,
+            total_idx_tup_fetch BIGINT,
+            total_n_tup_ins BIGINT,
+            total_n_tup_upd BIGINT,
+            total_n_tup_del BIGINT,
+            total_n_tup_hot_upd BIGINT,
+            total_n_live_tup BIGINT,
+            total_n_dead_tup BIGINT,
+            total_n_mod_since_analyze BIGINT,
+            PRIMARY KEY (root_schema, root_table, stat_date)
+        );
+    END IF;
+    
+    -- 2. Создание таблицы для дельт, если не существует
+    IF NOT EXISTS (SELECT 1 FROM pg_tables WHERE tablename = 'partition_stats_delta' AND schemaname = 'public') THEN
+        CREATE TABLE public.partition_stats_delta (
+            root_schema TEXT,
+            root_table TEXT,
+            period_start DATE,
+            period_end DATE,
+            delta_seq_scan BIGINT,
+            delta_seq_tup_read BIGINT,
+            delta_idx_scan BIGINT,
+            delta_idx_tup_fetch BIGINT,
+            delta_n_tup_ins BIGINT,
+            delta_n_tup_upd BIGINT,
+            delta_n_tup_del BIGINT,
+            delta_n_tup_hot_upd BIGINT,
+            delta_n_live_tup BIGINT,
+            delta_n_dead_tup BIGINT,
+            delta_n_mod_since_analyze BIGINT,
+            PRIMARY KEY (root_schema, root_table, period_start, period_end)
+        );
+    END IF;
+    
+    -- Временная таблица для хранения текущей статистики
+    CREATE TEMP TABLE temp_current_stats ON COMMIT DROP AS
+    WITH partition_hierarchy AS (
+        SELECT DISTINCT
+            schemaname AS root_schema,
+            tablename AS root_table,
+            partitionschemaname AS partition_schema,
+            partitiontablename AS partition_name
+        FROM pg_partitions
+        WHERE partitiontablename IS NOT NULL
+            AND partitiontablename != tablename
+    ),
+    partition_stats AS (
+        SELECT 
+            ph.root_schema,
+            ph.root_table,
+            SUM(COALESCE(stat.seq_scan, 0)) AS total_seq_scan,
+            SUM(COALESCE(stat.seq_tup_read, 0)) AS total_seq_tup_read,
+            SUM(COALESCE(stat.idx_scan, 0)) AS total_idx_scan,
+            SUM(COALESCE(stat.idx_tup_fetch, 0)) AS total_idx_tup_fetch,
+            SUM(COALESCE(stat.n_tup_ins, 0)) AS total_n_tup_ins,
+            SUM(COALESCE(stat.n_tup_upd, 0)) AS total_n_tup_upd,
+            SUM(COALESCE(stat.n_tup_del, 0)) AS total_n_tup_del,
+            SUM(COALESCE(stat.n_tup_hot_upd, 0)) AS total_n_tup_hot_upd,
+            SUM(COALESCE(stat.n_live_tup, 0)) AS total_n_live_tup,
+            SUM(COALESCE(stat.n_dead_tup, 0)) AS total_n_dead_tup,
+            SUM(COALESCE(stat.n_mod_since_analyze, 0)) AS total_n_mod_since_analyze
+        FROM partition_hierarchy ph
+        LEFT JOIN gp_dist_random('pg_stat_user_tables') stat 
+            ON stat.schemaname = ph.partition_schema 
+            AND stat.relname = ph.partition_name
+        GROUP BY ph.root_schema, ph.root_table
+    )
+    SELECT 
+        root_schema,
+        root_table,
+        current_stat_date AS stat_date,
+        total_seq_scan,
+        total_seq_tup_read,
+        total_idx_scan,
+        total_idx_tup_fetch,
+        total_n_tup_ins,
+        total_n_tup_upd,
+        total_n_tup_del,
+        total_n_tup_hot_upd,
+        total_n_live_tup,
+        total_n_dead_tup,
+        total_n_mod_since_analyze
+    FROM partition_stats;
+    
+    -- Вставка или обновление данных в основной таблице
+    FOR stat_row IN SELECT * FROM temp_current_stats
+    LOOP
+        -- Проверяем, существует ли уже запись для этой даты
+        IF EXISTS (
+            SELECT 1 
+            FROM public.partition_stats_history 
+            WHERE root_schema = stat_row.root_schema 
+                AND root_table = stat_row.root_table 
+                AND stat_date = stat_row.stat_date
+        ) THEN
+            -- Обновляем существующую запись
+            UPDATE public.partition_stats_history
+            SET 
+                total_seq_scan = stat_row.total_seq_scan,
+                total_seq_tup_read = stat_row.total_seq_tup_read,
+                total_idx_scan = stat_row.total_idx_scan,
+                total_idx_tup_fetch = stat_row.total_idx_tup_fetch,
+                total_n_tup_ins = stat_row.total_n_tup_ins,
+                total_n_tup_upd = stat_row.total_n_tup_upd,
+                total_n_tup_del = stat_row.total_n_tup_del,
+                total_n_tup_hot_upd = stat_row.total_n_tup_hot_upd,
+                total_n_live_tup = stat_row.total_n_live_tup,
+                total_n_dead_tup = stat_row.total_n_dead_tup,
+                total_n_mod_since_analyze = stat_row.total_n_mod_since_analyze
+            WHERE root_schema = stat_row.root_schema 
+                AND root_table = stat_row.root_table 
+                AND stat_date = stat_row.stat_date;
+        ELSE
+            -- Вставляем новую запись
+            INSERT INTO public.partition_stats_history 
+            VALUES (
+                stat_row.root_schema,
+                stat_row.root_table,
+                stat_row.stat_date,
+                stat_row.total_seq_scan,
+                stat_row.total_seq_tup_read,
+                stat_row.total_idx_scan,
+                stat_row.total_idx_tup_fetch,
+                stat_row.total_n_tup_ins,
+                stat_row.total_n_tup_upd,
+                stat_row.total_n_tup_del,
+                stat_row.total_n_tup_hot_upd,
+                stat_row.total_n_live_tup,
+                stat_row.total_n_dead_tup,
+                stat_row.total_n_mod_since_analyze
+            );
+        END IF;
+    END LOOP;
+    
+    -- Вычисление и запись дельт
+    FOR stat_row IN 
+        SELECT 
+            h1.root_schema,
+            h1.root_table,
+            h1.stat_date AS current_date,
+            h1.total_seq_scan,
+            h1.total_seq_tup_read,
+            h1.total_idx_scan,
+            h1.total_idx_tup_fetch,
+            h1.total_n_tup_ins,
+            h1.total_n_tup_upd,
+            h1.total_n_tup_del,
+            h1.total_n_tup_hot_upd,
+            h1.total_n_live_tup,
+            h1.total_n_dead_tup,
+            h1.total_n_mod_since_analyze,
+            h2.stat_date AS prev_date,
+            h2.total_seq_scan AS prev_seq_scan,
+            h2.total_seq_tup_read AS prev_seq_tup_read,
+            h2.total_idx_scan AS prev_idx_scan,
+            h2.total_idx_tup_fetch AS prev_idx_tup_fetch,
+            h2.total_n_tup_ins AS prev_n_tup_ins,
+            h2.total_n_tup_upd AS prev_n_tup_upd,
+            h2.total_n_tup_del AS prev_n_tup_del,
+            h2.total_n_tup_hot_upd AS prev_n_tup_hot_upd,
+            h2.total_n_live_tup AS prev_n_live_tup,
+            h2.total_n_dead_tup AS prev_n_dead_tup,
+            h2.total_n_mod_since_analyze AS prev_n_mod_since_analyze
+        FROM public.partition_stats_history h1
+        LEFT JOIN public.partition_stats_history h2 ON 
+            h1.root_schema = h2.root_schema 
+            AND h1.root_table = h2.root_table
+            AND h2.stat_date = (
+                SELECT MAX(stat_date) 
+                FROM public.partition_stats_history 
+                WHERE root_schema = h1.root_schema 
+                    AND root_table = h1.root_table 
+                    AND stat_date < h1.stat_date
+            )
+        WHERE h1.stat_date = current_stat_date
+    LOOP
+        -- Если есть предыдущая запись для расчета дельты
+        IF stat_row.prev_date IS NOT NULL THEN
+            -- Проверяем, существует ли уже дельта для этого периода
+            IF NOT EXISTS (
+                SELECT 1 
+                FROM public.partition_stats_delta 
+                WHERE root_schema = stat_row.root_schema 
+                    AND root_table = stat_row.root_table 
+                    AND period_start = stat_row.prev_date 
+                    AND period_end = stat_row.current_date
+            ) THEN
+                -- Вставляем новую дельту
+                INSERT INTO public.partition_stats_delta 
+                VALUES (
+                    stat_row.root_schema,
+                    stat_row.root_table,
+                    stat_row.prev_date,
+                    stat_row.current_date,
+                    stat_row.total_seq_scan - stat_row.prev_seq_scan,
+                    stat_row.total_seq_tup_read - stat_row.prev_seq_tup_read,
+                    stat_row.total_idx_scan - stat_row.prev_idx_scan,
+                    stat_row.total_idx_tup_fetch - stat_row.prev_idx_tup_fetch,
+                    stat_row.total_n_tup_ins - stat_row.prev_n_tup_ins,
+                    stat_row.total_n_tup_upd - stat_row.prev_n_tup_upd,
+                    stat_row.total_n_tup_del - stat_row.prev_n_tup_del,
+                    stat_row.total_n_tup_hot_upd - stat_row.prev_n_tup_hot_upd,
+                    stat_row.total_n_live_tup - stat_row.prev_n_live_tup,
+                    stat_row.total_n_dead_tup - stat_row.prev_n_dead_tup,
+                    stat_row.total_n_mod_since_analyze - stat_row.prev_n_mod_since_analyze
+                );
+            ELSE
+                -- Обновляем существующую дельту
+                UPDATE public.partition_stats_delta
+                SET 
+                    delta_seq_scan = stat_row.total_seq_scan - stat_row.prev_seq_scan,
+                    delta_seq_tup_read = stat_row.total_seq_tup_read - stat_row.prev_seq_tup_read,
+                    delta_idx_scan = stat_row.total_idx_scan - stat_row.prev_idx_scan,
+                    delta_idx_tup_fetch = stat_row.total_idx_tup_fetch - stat_row.prev_idx_tup_fetch,
+                    delta_n_tup_ins = stat_row.total_n_tup_ins - stat_row.prev_n_tup_ins,
+                    delta_n_tup_upd = stat_row.total_n_tup_upd - stat_row.prev_n_tup_upd,
+                    delta_n_tup_del = stat_row.total_n_tup_del - stat_row.prev_n_tup_del,
+                    delta_n_tup_hot_upd = stat_row.total_n_tup_hot_upd - stat_row.prev_n_tup_hot_upd,
+                    delta_n_live_tup = stat_row.total_n_live_tup - stat_row.prev_n_live_tup,
+                    delta_n_dead_tup = stat_row.total_n_dead_tup - stat_row.prev_n_dead_tup,
+                    delta_n_mod_since_analyze = stat_row.total_n_mod_since_analyze - stat_row.prev_n_mod_since_analyze
+                WHERE root_schema = stat_row.root_schema 
+                    AND root_table = stat_row.root_table 
+                    AND period_start = stat_row.prev_date 
+                    AND period_end = stat_row.current_date;
+            END IF;
+        END IF;
+    END LOOP;
+    
+    -- Очистка временной таблицы
+    DROP TABLE temp_current_stats;
+    
+    RETURN;
+END;
+$$
+LANGUAGE plpgsql
+VOLATILE
+EXECUTE ON MASTER;
