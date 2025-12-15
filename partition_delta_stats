@@ -1,0 +1,258 @@
+-- 1. Создание схемы dbatools если она не существует
+CREATE SCHEMA IF NOT EXISTS dbatools;
+
+-- 2. Создание таблиц в схеме dbatools
+CREATE TABLE IF NOT EXISTS dbatools.partition_stats_history (
+    root_schema TEXT,
+    root_table TEXT,
+    total_seq_scan BIGINT,
+    total_seq_tup_read BIGINT,
+    total_idx_scan BIGINT,
+    total_idx_tup_fetch BIGINT,
+    total_n_tup_ins BIGINT,
+    total_n_tup_upd BIGINT,
+    total_n_tup_del BIGINT,
+    total_n_tup_hot_upd BIGINT,
+    total_n_live_tup BIGINT,
+    total_n_dead_tup BIGINT,
+    total_n_mod_since_analyze BIGINT,
+    stats_date DATE NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (root_schema, root_table, stats_date)
+) DISTRIBUTED BY (root_schema, root_table);
+
+CREATE TABLE IF NOT EXISTS dbatools.partition_stats_delta (
+    root_schema TEXT,
+    root_table TEXT,
+    delta_seq_scan BIGINT,
+    delta_seq_tup_read BIGINT,
+    delta_idx_scan BIGINT,
+    delta_idx_tup_fetch BIGINT,
+    delta_n_tup_ins BIGINT,
+    delta_n_tup_upd BIGINT,
+    delta_n_tup_del BIGINT,
+    delta_n_tup_hot_upd BIGINT,
+    delta_n_live_tup BIGINT,
+    delta_n_dead_tup BIGINT,
+    delta_n_mod_since_analyze BIGINT,
+    period_start DATE NOT NULL,
+    period_end DATE NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (root_schema, root_table, period_start, period_end)
+) DISTRIBUTED BY (root_schema, root_table);
+
+-- 3. Вспомогательная таблица для хранения промежуточных результатов
+CREATE TEMP TABLE IF NOT EXISTS temp_partition_stats (
+    root_schema TEXT,
+    root_table TEXT,
+    total_seq_scan BIGINT,
+    total_seq_tup_read BIGINT,
+    total_idx_scan BIGINT,
+    total_idx_tup_fetch BIGINT,
+    total_n_tup_ins BIGINT,
+    total_n_tup_upd BIGINT,
+    total_n_tup_del BIGINT,
+    total_n_tup_hot_upd BIGINT,
+    total_n_live_tup BIGINT,
+    total_n_dead_tup BIGINT,
+    total_n_mod_since_analyze BIGINT
+) DISTRIBUTED BY (root_schema, root_table) ON COMMIT DELETE ROWS;
+
+-- 4. Основная функция с исправлением для Greenplum
+CREATE OR REPLACE FUNCTION dbatools.gather_partition_stats()
+RETURNS void AS $$
+DECLARE
+    current_stats_date DATE := CURRENT_DATE;
+    prev_stats RECORD;
+    row_exists BOOLEAN;
+BEGIN
+    -- Очищаем временную таблицу
+    DELETE FROM temp_partition_stats;
+    
+    -- Собираем статистику во временную таблицу
+    INSERT INTO temp_partition_stats
+    WITH partition_hierarchy AS (
+        SELECT DISTINCT
+            schemaname AS root_schema,
+            tablename AS root_table,
+            partitionschemaname AS partition_schema,
+            partitiontablename AS partition_name
+        FROM pg_partitions
+        WHERE partitiontablename IS NOT NULL
+            AND partitiontablename != tablename
+    )
+    SELECT 
+        ph.root_schema,
+        ph.root_table,
+        SUM(COALESCE(stat.seq_scan, 0)) AS total_seq_scan,
+        SUM(COALESCE(stat.seq_tup_read, 0)) AS total_seq_tup_read,
+        SUM(COALESCE(stat.idx_scan, 0)) AS total_idx_scan,
+        SUM(COALESCE(stat.idx_tup_fetch, 0)) AS total_idx_tup_fetch,
+        SUM(COALESCE(stat.n_tup_ins, 0)) AS total_n_tup_ins,
+        SUM(COALESCE(stat.n_tup_upd, 0)) AS total_n_tup_upd,
+        SUM(COALESCE(stat.n_tup_del, 0)) AS total_n_tup_del,
+        SUM(COALESCE(stat.n_tup_hot_upd, 0)) AS total_n_tup_hot_upd,
+        SUM(COALESCE(stat.n_live_tup, 0)) AS total_n_live_tup,
+        SUM(COALESCE(stat.n_dead_tup, 0)) AS total_n_dead_tup,
+        SUM(COALESCE(stat.n_mod_since_analyze, 0)) AS total_n_mod_since_analyze
+    FROM partition_hierarchy ph
+    LEFT JOIN gp_dist_random('pg_stat_user_tables') stat 
+        ON stat.schemaname = ph.partition_schema 
+        AND stat.relname = ph.partition_name
+    GROUP BY ph.root_schema, ph.root_table;
+
+    -- 1. Сначала обновляем существующие записи
+    UPDATE dbatools.partition_stats_history t
+    SET 
+        total_seq_scan = s.total_seq_scan,
+        total_seq_tup_read = s.total_seq_tup_read,
+        total_idx_scan = s.total_idx_scan,
+        total_idx_tup_fetch = s.total_idx_tup_fetch,
+        total_n_tup_ins = s.total_n_tup_ins,
+        total_n_tup_upd = s.total_n_tup_upd,
+        total_n_tup_del = s.total_n_tup_del,
+        total_n_tup_hot_upd = s.total_n_tup_hot_upd,
+        total_n_live_tup = s.total_n_live_tup,
+        total_n_dead_tup = s.total_n_dead_tup,
+        total_n_mod_since_analyze = s.total_n_mod_since_analyze,
+        created_at = CURRENT_TIMESTAMP
+    FROM temp_partition_stats s
+    WHERE t.root_schema = s.root_schema 
+      AND t.root_table = s.root_table 
+      AND t.stats_date = current_stats_date;
+    
+    -- 2. Затем вставляем новые записи
+    INSERT INTO dbatools.partition_stats_history (
+        root_schema, root_table,
+        total_seq_scan, total_seq_tup_read,
+        total_idx_scan, total_idx_tup_fetch,
+        total_n_tup_ins, total_n_tup_upd,
+        total_n_tup_del, total_n_tup_hot_upd,
+        total_n_live_tup, total_n_dead_tup,
+        total_n_mod_since_analyze,
+        stats_date
+    )
+    SELECT 
+        s.root_schema,
+        s.root_table,
+        s.total_seq_scan,
+        s.total_seq_tup_read,
+        s.total_idx_scan,
+        s.total_idx_tup_fetch,
+        s.total_n_tup_ins,
+        s.total_n_tup_upd,
+        s.total_n_tup_del,
+        s.total_n_tup_hot_upd,
+        s.total_n_live_tup,
+        s.total_n_dead_tup,
+        s.total_n_mod_since_analyze,
+        current_stats_date
+    FROM temp_partition_stats s
+    WHERE NOT EXISTS (
+        SELECT 1 
+        FROM dbatools.partition_stats_history t
+        WHERE t.root_schema = s.root_schema 
+          AND t.root_table = s.root_table 
+          AND t.stats_date = current_stats_date
+    );
+
+    -- Вычисление дельт с использованием временной таблицы
+    FOR prev_stats IN 
+        SELECT 
+            cur.root_schema,
+            cur.root_table,
+            cur.stats_date as current_date,
+            prev.stats_date as previous_date,
+            cur.total_seq_scan - COALESCE(prev.total_seq_scan, 0) as delta_seq_scan,
+            cur.total_seq_tup_read - COALESCE(prev.total_seq_tup_read, 0) as delta_seq_tup_read,
+            cur.total_idx_scan - COALESCE(prev.total_idx_scan, 0) as delta_idx_scan,
+            cur.total_idx_tup_fetch - COALESCE(prev.total_idx_tup_fetch, 0) as delta_idx_tup_fetch,
+            cur.total_n_tup_ins - COALESCE(prev.total_n_tup_ins, 0) as delta_n_tup_ins,
+            cur.total_n_tup_upd - COALESCE(prev.total_n_tup_upd, 0) as delta_n_tup_upd,
+            cur.total_n_tup_del - COALESCE(prev.total_n_tup_del, 0) as delta_n_tup_del,
+            cur.total_n_tup_hot_upd - COALESCE(prev.total_n_tup_hot_upd, 0) as delta_n_tup_hot_upd,
+            cur.total_n_live_tup - COALESCE(prev.total_n_live_tup, 0) as delta_n_live_tup,
+            cur.total_n_dead_tup - COALESCE(prev.total_n_dead_tup, 0) as delta_n_dead_tup,
+            cur.total_n_mod_since_analyze - COALESCE(prev.total_n_mod_since_analyze, 0) as delta_n_mod_since_analyze
+        FROM dbatools.partition_stats_history cur
+        LEFT JOIN dbatools.partition_stats_history prev 
+            ON cur.root_schema = prev.root_schema 
+            AND cur.root_table = prev.root_table
+            AND prev.stats_date = (
+                SELECT MAX(stats_date) 
+                FROM dbatools.partition_stats_history 
+                WHERE root_schema = cur.root_schema 
+                    AND root_table = cur.root_table 
+                    AND stats_date < cur.stats_date
+            )
+        WHERE cur.stats_date = current_stats_date
+          AND prev.stats_date IS NOT NULL
+    LOOP
+        -- Проверяем существование записи
+        SELECT EXISTS (
+            SELECT 1 
+            FROM dbatools.partition_stats_delta d
+            WHERE d.root_schema = prev_stats.root_schema 
+              AND d.root_table = prev_stats.root_table 
+              AND d.period_start = prev_stats.previous_date 
+              AND d.period_end = prev_stats.current_date
+        ) INTO row_exists;
+        
+        -- Обновляем или вставляем
+        IF row_exists THEN
+            UPDATE dbatools.partition_stats_delta d
+            SET 
+                delta_seq_scan = prev_stats.delta_seq_scan,
+                delta_seq_tup_read = prev_stats.delta_seq_tup_read,
+                delta_idx_scan = prev_stats.delta_idx_scan,
+                delta_idx_tup_fetch = prev_stats.delta_idx_tup_fetch,
+                delta_n_tup_ins = prev_stats.delta_n_tup_ins,
+                delta_n_tup_upd = prev_stats.delta_n_tup_upd,
+                delta_n_tup_del = prev_stats.delta_n_tup_del,
+                delta_n_tup_hot_upd = prev_stats.delta_n_tup_hot_upd,
+                delta_n_live_tup = prev_stats.delta_n_live_tup,
+                delta_n_dead_tup = prev_stats.delta_n_dead_tup,
+                delta_n_mod_since_analyze = prev_stats.delta_n_mod_since_analyze,
+                created_at = CURRENT_TIMESTAMP
+            WHERE d.root_schema = prev_stats.root_schema 
+              AND d.root_table = prev_stats.root_table 
+              AND d.period_start = prev_stats.previous_date 
+              AND d.period_end = prev_stats.current_date;
+        ELSE
+            INSERT INTO dbatools.partition_stats_delta (
+                root_schema, root_table,
+                delta_seq_scan, delta_seq_tup_read,
+                delta_idx_scan, delta_idx_tup_fetch,
+                delta_n_tup_ins, delta_n_tup_upd,
+                delta_n_tup_del, delta_n_tup_hot_upd,
+                delta_n_live_tup, delta_n_dead_tup,
+                delta_n_mod_since_analyze,
+                period_start, period_end
+            ) VALUES (
+                prev_stats.root_schema,
+                prev_stats.root_table,
+                prev_stats.delta_seq_scan,
+                prev_stats.delta_seq_tup_read,
+                prev_stats.delta_idx_scan,
+                prev_stats.delta_idx_tup_fetch,
+                prev_stats.delta_n_tup_ins,
+                prev_stats.delta_n_tup_upd,
+                prev_stats.delta_n_tup_del,
+                prev_stats.delta_n_tup_hot_upd,
+                prev_stats.delta_n_live_tup,
+                prev_stats.delta_n_dead_tup,
+                prev_stats.delta_n_mod_since_analyze,
+                prev_stats.previous_date,
+                prev_stats.current_date
+            );
+        END IF;
+    END LOOP;
+    
+    -- Очищаем временную таблицу
+    DELETE FROM temp_partition_stats;
+    
+    -- Выводим информационное сообщение
+    RAISE NOTICE 'Статистика партиций собрана и обработана за %', current_stats_date;
+    
+END;
+$$ LANGUAGE plpgsql;
