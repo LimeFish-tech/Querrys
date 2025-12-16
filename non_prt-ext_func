@@ -1,0 +1,310 @@
+-- 1. Создание таблиц для статистики обычных таблиц
+CREATE TABLE IF NOT EXISTS dbatools.regular_table_stats_history (
+    schemaname TEXT,
+    tablename TEXT,
+    full_table_name TEXT,
+    total_seq_scan BIGINT,
+    total_seq_tup_read BIGINT,
+    total_idx_scan BIGINT,
+    total_idx_tup_fetch BIGINT,
+    total_n_tup_ins BIGINT,
+    total_n_tup_upd BIGINT,
+    total_n_tup_del BIGINT,
+    total_n_tup_hot_upd BIGINT,
+    total_n_live_tup BIGINT,
+    total_n_dead_tup BIGINT,
+    total_n_mod_since_analyze BIGINT,
+    stats_date DATE NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (schemaname, tablename, stats_date)
+) DISTRIBUTED BY (schemaname, tablename);
+
+CREATE TABLE IF NOT EXISTS dbatools.regular_table_stats_delta (
+    schemaname TEXT,
+    tablename TEXT,
+    full_table_name TEXT,
+    delta_seq_scan BIGINT,
+    delta_seq_tup_read BIGINT,
+    delta_idx_scan BIGINT,
+    delta_idx_tup_fetch BIGINT,
+    delta_n_tup_ins BIGINT,
+    delta_n_tup_upd BIGINT,
+    delta_n_tup_del BIGINT,
+    delta_n_tup_hot_upd BIGINT,
+    delta_n_live_tup BIGINT,
+    delta_n_dead_tup BIGINT,
+    delta_n_mod_since_analyze BIGINT,
+    period_start DATE NOT NULL,
+    period_end DATE NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (schemaname, tablename, period_start, period_end)
+) DISTRIBUTED BY (schemaname, tablename);
+
+-- 2. Создание временной таблицы
+CREATE TEMP TABLE IF NOT EXISTS temp_regular_table_stats (
+    schemaname TEXT,
+    tablename TEXT,
+    full_table_name TEXT,
+    total_seq_scan BIGINT,
+    total_seq_tup_read BIGINT,
+    total_idx_scan BIGINT,
+    total_idx_tup_fetch BIGINT,
+    total_n_tup_ins BIGINT,
+    total_n_tup_upd BIGINT,
+    total_n_tup_del BIGINT,
+    total_n_tup_hot_upd BIGINT,
+    total_n_live_tup BIGINT,
+    total_n_dead_tup BIGINT,
+    total_n_mod_since_analyze BIGINT
+) DISTRIBUTED BY (schemaname, tablename);
+
+-- 3. Функция для сбора статистики обычных таблиц
+CREATE OR REPLACE FUNCTION dbatools.gather_regular_table_stats()
+RETURNS void AS $$
+DECLARE
+    current_stats_date DATE := CURRENT_DATE;
+    prev_stats RECORD;
+    row_exists BOOLEAN;
+BEGIN
+    -- Очищаем временную таблицу
+    DELETE FROM temp_regular_table_stats;
+    
+    -- Собираем статистику во временную таблицу
+    INSERT INTO temp_regular_table_stats
+    WITH 
+    user_tables AS (
+        SELECT 
+            schemaname,
+            tablename,
+            schemaname || '.' || tablename AS full_table_name
+        FROM pg_tables
+        WHERE schemaname NOT IN ('pg_catalog', 'information_schema', 'gp_toolkit')
+    ),
+    non_external_tables AS (
+        SELECT 
+            ut.*
+        FROM user_tables ut
+        WHERE NOT EXISTS (
+            SELECT 1 FROM pg_exttable e
+            JOIN pg_class c ON c.oid = e.reloid
+            JOIN pg_namespace n ON c.relnamespace = n.oid
+            WHERE n.nspname = ut.schemaname 
+              AND c.relname = ut.tablename
+        )
+    ),
+    non_partitioned_tables AS (
+        SELECT 
+            net.*
+        FROM non_external_tables net
+        WHERE NOT EXISTS (
+            SELECT 1 FROM pg_partitions p
+            WHERE p.schemaname = net.schemaname 
+              AND p.tablename = net.tablename
+              AND p.partitiontablename IS NOT NULL
+              AND p.partitiontablename != p.tablename
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM pg_partitions p
+            WHERE p.partitionschemaname = net.schemaname 
+              AND p.partitiontablename = net.tablename
+        )
+    ),
+    table_stats AS (
+        SELECT 
+            npt.schemaname,
+            npt.tablename,
+            npt.full_table_name,
+            SUM(COALESCE(stat.seq_scan, 0)) AS total_seq_scan,
+            SUM(COALESCE(stat.seq_tup_read, 0)) AS total_seq_tup_read,
+            SUM(COALESCE(stat.idx_scan, 0)) AS total_idx_scan,
+            SUM(COALESCE(stat.idx_tup_fetch, 0)) AS total_idx_tup_fetch,
+            SUM(COALESCE(stat.n_tup_ins, 0)) AS total_n_tup_ins,
+            SUM(COALESCE(stat.n_tup_upd, 0)) AS total_n_tup_upd,
+            SUM(COALESCE(stat.n_tup_del, 0)) AS total_n_tup_del,
+            SUM(COALESCE(stat.n_tup_hot_upd, 0)) AS total_n_tup_hot_upd,
+            SUM(COALESCE(stat.n_live_tup, 0)) AS total_n_live_tup,
+            SUM(COALESCE(stat.n_dead_tup, 0)) AS total_n_dead_tup,
+            SUM(COALESCE(stat.n_mod_since_analyze, 0)) AS total_n_mod_since_analyze
+        FROM non_partitioned_tables npt
+        LEFT JOIN gp_dist_random('pg_stat_user_tables') stat 
+            ON stat.schemaname = npt.schemaname 
+            AND stat.relname = npt.tablename
+        GROUP BY npt.schemaname, npt.tablename, npt.full_table_name
+    )
+    SELECT 
+        schemaname,
+        tablename,
+        full_table_name,
+        total_seq_scan,
+        total_seq_tup_read,
+        total_idx_scan,
+        total_idx_tup_fetch,
+        total_n_tup_ins,
+        total_n_tup_upd,
+        total_n_tup_del,
+        total_n_tup_hot_upd,
+        total_n_live_tup,
+        total_n_dead_tup,
+        total_n_mod_since_analyze
+    FROM table_stats;
+
+    -- 1. Обновляем существующие записи в истории
+    UPDATE dbatools.regular_table_stats_history t
+    SET 
+        full_table_name = s.full_table_name,
+        total_seq_scan = s.total_seq_scan,
+        total_seq_tup_read = s.total_seq_tup_read,
+        total_idx_scan = s.total_idx_scan,
+        total_idx_tup_fetch = s.total_idx_tup_fetch,
+        total_n_tup_ins = s.total_n_tup_ins,
+        total_n_tup_upd = s.total_n_tup_upd,
+        total_n_tup_del = s.total_n_tup_del,
+        total_n_tup_hot_upd = s.total_n_tup_hot_upd,
+        total_n_live_tup = s.total_n_live_tup,
+        total_n_dead_tup = s.total_n_dead_tup,
+        total_n_mod_since_analyze = s.total_n_mod_since_analyze,
+        created_at = CURRENT_TIMESTAMP
+    FROM temp_regular_table_stats s
+    WHERE t.schemaname = s.schemaname 
+      AND t.tablename = s.tablename 
+      AND t.stats_date = current_stats_date;
+    
+    -- 2. Вставляем новые записи в историю
+    INSERT INTO dbatools.regular_table_stats_history (
+        schemaname, tablename, full_table_name,
+        total_seq_scan, total_seq_tup_read,
+        total_idx_scan, total_idx_tup_fetch,
+        total_n_tup_ins, total_n_tup_upd,
+        total_n_tup_del, total_n_tup_hot_upd,
+        total_n_live_tup, total_n_dead_tup,
+        total_n_mod_since_analyze,
+        stats_date
+    )
+    SELECT 
+        s.schemaname,
+        s.tablename,
+        s.full_table_name,
+        s.total_seq_scan,
+        s.total_seq_tup_read,
+        s.total_idx_scan,
+        s.total_idx_tup_fetch,
+        s.total_n_tup_ins,
+        s.total_n_tup_upd,
+        s.total_n_tup_del,
+        s.total_n_tup_hot_upd,
+        s.total_n_live_tup,
+        s.total_n_dead_tup,
+        s.total_n_mod_since_analyze,
+        current_stats_date
+    FROM temp_regular_table_stats s
+    WHERE NOT EXISTS (
+        SELECT 1 
+        FROM dbatools.regular_table_stats_history t
+        WHERE t.schemaname = s.schemaname 
+          AND t.tablename = s.tablename 
+          AND t.stats_date = current_stats_date
+    );
+
+    -- Вычисление дельт
+    FOR prev_stats IN 
+        SELECT 
+            cur.schemaname,
+            cur.tablename,
+            cur.full_table_name,
+            cur.stats_date as current_date,
+            prev.stats_date as previous_date,
+            cur.total_seq_scan - COALESCE(prev.total_seq_scan, 0) as delta_seq_scan,
+            cur.total_seq_tup_read - COALESCE(prev.total_seq_tup_read, 0) as delta_seq_tup_read,
+            cur.total_idx_scan - COALESCE(prev.total_idx_scan, 0) as delta_idx_scan,
+            cur.total_idx_tup_fetch - COALESCE(prev.total_idx_tup_fetch, 0) as delta_idx_tup_fetch,
+            cur.total_n_tup_ins - COALESCE(prev.total_n_tup_ins, 0) as delta_n_tup_ins,
+            cur.total_n_tup_upd - COALESCE(prev.total_n_tup_upd, 0) as delta_n_tup_upd,
+            cur.total_n_tup_del - COALESCE(prev.total_n_tup_del, 0) as delta_n_tup_del,
+            cur.total_n_tup_hot_upd - COALESCE(prev.total_n_tup_hot_upd, 0) as delta_n_tup_hot_upd,
+            cur.total_n_live_tup - COALESCE(prev.total_n_live_tup, 0) as delta_n_live_tup,
+            cur.total_n_dead_tup - COALESCE(prev.total_n_dead_tup, 0) as delta_n_dead_tup,
+            cur.total_n_mod_since_analyze - COALESCE(prev.total_n_mod_since_analyze, 0) as delta_n_mod_since_analyze
+        FROM dbatools.regular_table_stats_history cur
+        LEFT JOIN dbatools.regular_table_stats_history prev 
+            ON cur.schemaname = prev.schemaname 
+            AND cur.tablename = prev.tablename
+            AND prev.stats_date = (
+                SELECT MAX(stats_date) 
+                FROM dbatools.regular_table_stats_history 
+                WHERE schemaname = cur.schemaname 
+                    AND tablename = cur.tablename 
+                    AND stats_date < cur.stats_date
+            )
+        WHERE cur.stats_date = current_stats_date
+          AND prev.stats_date IS NOT NULL
+    LOOP
+        -- Проверяем существование записи в дельтах
+        SELECT EXISTS (
+            SELECT 1 
+            FROM dbatools.regular_table_stats_delta d
+            WHERE d.schemaname = prev_stats.schemaname 
+              AND d.tablename = prev_stats.tablename 
+              AND d.period_start = prev_stats.previous_date 
+              AND d.period_end = prev_stats.current_date
+        ) INTO row_exists;
+        
+        -- Обновляем или вставляем
+        IF row_exists THEN
+            UPDATE dbatools.regular_table_stats_delta d
+            SET 
+                full_table_name = prev_stats.full_table_name,
+                delta_seq_scan = prev_stats.delta_seq_scan,
+                delta_seq_tup_read = prev_stats.delta_seq_tup_read,
+                delta_idx_scan = prev_stats.delta_idx_scan,
+                delta_idx_tup_fetch = prev_stats.delta_idx_tup_fetch,
+                delta_n_tup_ins = prev_stats.delta_n_tup_ins,
+                delta_n_tup_upd = prev_stats.delta_n_tup_upd,
+                delta_n_tup_del = prev_stats.delta_n_tup_del,
+                delta_n_tup_hot_upd = prev_stats.delta_n_tup_hot_upd,
+                delta_n_live_tup = prev_stats.delta_n_live_tup,
+                delta_n_dead_tup = prev_stats.delta_n_dead_tup,
+                delta_n_mod_since_analyze = prev_stats.delta_n_mod_since_analyze,
+                created_at = CURRENT_TIMESTAMP
+            WHERE d.schemaname = prev_stats.schemaname 
+              AND d.tablename = prev_stats.tablename 
+              AND d.period_start = prev_stats.previous_date 
+              AND d.period_end = prev_stats.current_date;
+        ELSE
+            INSERT INTO dbatools.regular_table_stats_delta (
+                schemaname, tablename, full_table_name,
+                delta_seq_scan, delta_seq_tup_read,
+                delta_idx_scan, delta_idx_tup_fetch,
+                delta_n_tup_ins, delta_n_tup_upd,
+                delta_n_tup_del, delta_n_tup_hot_upd,
+                delta_n_live_tup, delta_n_dead_tup,
+                delta_n_mod_since_analyze,
+                period_start, period_end
+            ) VALUES (
+                prev_stats.schemaname,
+                prev_stats.tablename,
+                prev_stats.full_table_name,
+                prev_stats.delta_seq_scan,
+                prev_stats.delta_seq_tup_read,
+                prev_stats.delta_idx_scan,
+                prev_stats.delta_idx_tup_fetch,
+                prev_stats.delta_n_tup_ins,
+                prev_stats.delta_n_tup_upd,
+                prev_stats.delta_n_tup_del,
+                prev_stats.delta_n_tup_hot_upd,
+                prev_stats.delta_n_live_tup,
+                prev_stats.delta_n_dead_tup,
+                prev_stats.delta_n_mod_since_analyze,
+                prev_stats.previous_date,
+                prev_stats.current_date
+            );
+        END IF;
+    END LOOP;
+    
+    -- Явно удаляем временную таблицу
+    DROP TABLE IF EXISTS temp_regular_table_stats;
+    
+    -- Выводим информационное сообщение
+    RAISE NOTICE 'Статистика обычных таблиц собрана и обработана за %', current_stats_date;
+    
+END;
+$$ LANGUAGE plpgsql;
