@@ -59,13 +59,7 @@ table_stats AS (
         SUM(COALESCE(stat.n_tup_hot_upd, 0)) AS total_n_tup_hot_upd,
         SUM(COALESCE(stat.n_live_tup, 0)) AS total_n_live_tup,
         SUM(COALESCE(stat.n_dead_tup, 0)) AS total_n_dead_tup,
-        SUM(COALESCE(stat.n_mod_since_analyze, 0)) AS total_n_mod_since_analyze,
-        SUM(COALESCE(stat.n_ins_since_vacuum, 0)) AS total_n_ins_since_vacuum,
-        MAX(stat.last_vacuum) AS last_vacuum,
-        MAX(stat.last_autovacuum) AS last_autovacuum,
-        MAX(stat.last_analyze) AS last_analyze,
-        MAX(stat.last_autoanalyze) AS last_autoanalyze,
-        COUNT(DISTINCT stat.gp_segment_id) AS segments_with_stats
+        SUM(COALESCE(stat.n_mod_since_analyze, 0)) AS total_n_mod_since_analyze
     FROM non_partitioned_tables npt
     -- Используем gp_dist_random для сбора статистики со всех сегментов
     LEFT JOIN gp_dist_random('pg_stat_user_tables') stat 
@@ -88,18 +82,6 @@ SELECT
     total_n_tup_hot_upd,
     total_n_live_tup,
     total_n_dead_tup,
-    total_n_mod_since_analyze,
-    total_n_ins_since_vacuum,
-    last_vacuum,
-    last_autovacuum,
-    last_analyze,
-    last_autoanalyze,
-    segments_with_stats,
-    CASE 
-        WHEN segments_with_stats = 0 THEN 'No statistics available'
-        WHEN segments_with_stats < (SELECT COUNT(DISTINCT content) FROM gp_segment_configuration WHERE content >= 0) 
-        THEN 'Partial statistics'
-        ELSE 'Full statistics from all segments'
-    END AS statistics_coverage
+    total_n_mod_since_analyze
 FROM table_stats
 ORDER BY schemaname, tablename;
