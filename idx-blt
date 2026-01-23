@@ -1,0 +1,35 @@
+SELECT
+    nspname AS schemaname,
+    tblname AS tablename,
+    idxname AS indexname,
+    pg_size_pretty(estimated_index_size) AS index_size,
+    round(100 * (estimated_index_size - estimated_optimal_size) / estimated_index_size::numeric, 1) AS bloat_percent,
+    pg_size_pretty(estimated_index_size - estimated_optimal_size) AS bloat_size
+FROM (
+    SELECT
+        nspname,
+        tblname,
+        idxname,
+        index_size AS estimated_index_size,
+        leaf_pages * 8192 AS estimated_optimal_size -- 8192 = размер страницы
+    FROM (
+        SELECT
+            n.nspname,
+            t.relname AS tblname,
+            i.relname AS idxname,
+            pg_relation_size(i.oid) AS index_size,
+            (
+                SELECT max(leafpages)
+                FROM pgstatindex(i.oid)
+            ) AS leaf_pages
+        FROM pg_class t
+        JOIN pg_index ix ON t.oid = ix.indrelid
+        JOIN pg_class i ON i.oid = ix.indexrelid
+        JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE t.relkind = 'r'
+          AND i.relkind = 'i'
+    ) AS sub
+) AS bloat_calc
+WHERE estimated_index_size > 0
+ORDER BY bloat_percent DESC
+LIMIT 20;
