@@ -1,0 +1,32 @@
+-- Детальный размер по типам объектов на каждом сегменте
+SELECT 
+    current_database() as database,
+    nspname as schemaname,
+    relname as tablename,
+    gp_segment_id,
+    CASE 
+        WHEN relkind = 'r' THEN 'table'
+        WHEN relkind = 'i' THEN 'index'
+        WHEN relkind = 'S' THEN 'sequence'
+        WHEN relkind = 't' THEN 'TOAST table'
+        WHEN relkind = 'v' THEN 'view'
+        WHEN relkind = 'm' THEN 'materialized view'
+        ELSE 'other'
+    END as object_type,
+    pg_size_pretty(size_bytes) as size_pretty,
+    size_bytes,
+    ROUND(size_bytes / 1073741824.0, 4) as size_gb
+FROM (
+    SELECT 
+        nspname,
+        relname,
+        relkind,
+        gp_segment_id,
+        pg_relation_size(pc.oid) as size_bytes
+    FROM gp_dist_random('pg_class') pc
+    JOIN gp_dist_random('pg_namespace') pn ON pc.relnamespace = pn.oid
+    WHERE pc.relkind IN ('r', 'i', 't')  -- таблицы, индексы, TOAST
+      AND nspname NOT IN ('pg_catalog', 'information_schema', 'gp_toolkit')
+      AND nspname NOT LIKE 'pg_temp%'
+) as objects
+ORDER BY size_bytes DESC, schemaname, relname, gp_segment_id;
