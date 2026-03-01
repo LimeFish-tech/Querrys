@@ -74,7 +74,7 @@ BEGIN
     -- Очищаем временную таблицу
     DELETE FROM temp_partition_stats_detail;
     
-    -- Собираем статистику по каждой партиции напрямую с сегментов
+    -- Собираем статистику по каждой партиции с агрегацией по сегментам
     INSERT INTO temp_partition_stats_detail
     WITH partition_hierarchy AS (
         SELECT DISTINCT
@@ -91,21 +91,22 @@ BEGIN
         ph.root_table,
         ph.partition_schema,
         ph.partition_name,
-        COALESCE(stat.seq_scan, 0) AS total_seq_scan,
-        COALESCE(stat.seq_tup_read, 0) AS total_seq_tup_read,
-        COALESCE(stat.idx_scan, 0) AS total_idx_scan,
-        COALESCE(stat.idx_tup_fetch, 0) AS total_idx_tup_fetch,
-        COALESCE(stat.n_tup_ins, 0) AS total_n_tup_ins,
-        COALESCE(stat.n_tup_upd, 0) AS total_n_tup_upd,
-        COALESCE(stat.n_tup_del, 0) AS total_n_tup_del,
-        COALESCE(stat.n_tup_hot_upd, 0) AS total_n_tup_hot_upd,
-        COALESCE(stat.n_live_tup, 0) AS total_n_live_tup,
-        COALESCE(stat.n_dead_tup, 0) AS total_n_dead_tup,
-        COALESCE(stat.n_mod_since_analyze, 0) AS total_n_mod_since_analyze
+        SUM(COALESCE(stat.seq_scan, 0)) AS total_seq_scan,
+        SUM(COALESCE(stat.seq_tup_read, 0)) AS total_seq_tup_read,
+        SUM(COALESCE(stat.idx_scan, 0)) AS total_idx_scan,
+        SUM(COALESCE(stat.idx_tup_fetch, 0)) AS total_idx_tup_fetch,
+        SUM(COALESCE(stat.n_tup_ins, 0)) AS total_n_tup_ins,
+        SUM(COALESCE(stat.n_tup_upd, 0)) AS total_n_tup_upd,
+        SUM(COALESCE(stat.n_tup_del, 0)) AS total_n_tup_del,
+        SUM(COALESCE(stat.n_tup_hot_upd, 0)) AS total_n_tup_hot_upd,
+        SUM(COALESCE(stat.n_live_tup, 0)) AS total_n_live_tup,
+        SUM(COALESCE(stat.n_dead_tup, 0)) AS total_n_dead_tup,
+        SUM(COALESCE(stat.n_mod_since_analyze, 0)) AS total_n_mod_since_analyze
     FROM partition_hierarchy ph
     LEFT JOIN gp_dist_random('pg_stat_user_tables') stat 
         ON stat.schemaname = ph.partition_schema 
-        AND stat.relname = ph.partition_name;
+        AND stat.relname = ph.partition_name
+    GROUP BY ph.root_schema, ph.root_table, ph.partition_schema, ph.partition_name;
 
     -- Обновляем существующие записи в истории за текущую дату
     UPDATE dbatools.partition_stats_history_detail t
