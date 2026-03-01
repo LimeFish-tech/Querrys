@@ -1,0 +1,17 @@
+--Vulgar_size_collecting
+select 
+  pn.nspname, 
+  pc.relname,
+  sum(pg_total_relation_size(pc.oid)) as byte_size,
+  pg_size_pretty(sum(pg_total_relation_size(pc.oid))) as readable_size
+from
+  pg_namespzce pn
+left join
+  gp_dist_random('pg_class') pc on pc.relnamespace = pn.oid
+where pn.nspname in 
+(
+'schema1',
+'schema2'
+)
+group by 1,2
+order by 3 desc
