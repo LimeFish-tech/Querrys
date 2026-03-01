@@ -1,3 +1,69 @@
+-- Таблица для хранения ежедневных срезов статистики по партициям
+CREATE TABLE IF NOT EXISTS dbatools.partition_stats_history_detail (
+    root_schema TEXT,
+    root_table TEXT,
+    partition_schema TEXT,
+    partition_name TEXT,
+    total_seq_scan BIGINT,
+    total_seq_tup_read BIGINT,
+    total_idx_scan BIGINT,
+    total_idx_tup_fetch BIGINT,
+    total_n_tup_ins BIGINT,
+    total_n_tup_upd BIGINT,
+    total_n_tup_del BIGINT,
+    total_n_tup_hot_upd BIGINT,
+    total_n_live_tup BIGINT,
+    total_n_dead_tup BIGINT,
+    total_n_mod_since_analyze BIGINT,
+    stats_date DATE NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (root_schema, root_table, partition_schema, partition_name, stats_date)
+) DISTRIBUTED BY (root_schema, root_table);
+
+-- Таблица для хранения дельт изменений между соседними датами по партициям
+CREATE TABLE IF NOT EXISTS dbatools.partition_stats_delta_detail (
+    root_schema TEXT,
+    root_table TEXT,
+    partition_schema TEXT,
+    partition_name TEXT,
+    delta_seq_scan BIGINT,
+    delta_seq_tup_read BIGINT,
+    delta_idx_scan BIGINT,
+    delta_idx_tup_fetch BIGINT,
+    delta_n_tup_ins BIGINT,
+    delta_n_tup_upd BIGINT,
+    delta_n_tup_del BIGINT,
+    delta_n_tup_hot_upd BIGINT,
+    delta_n_live_tup BIGINT,
+    delta_n_dead_tup BIGINT,
+    delta_n_mod_since_analyze BIGINT,
+    period_start DATE NOT NULL,
+    period_end DATE NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (root_schema, root_table, partition_schema, partition_name, period_start, period_end)
+) DISTRIBUTED BY (root_schema, root_table);
+
+-- Временная таблица для промежуточного хранения текущего среза
+CREATE TEMP TABLE IF NOT EXISTS temp_partition_stats_detail (
+    root_schema TEXT,
+    root_table TEXT,
+    partition_schema TEXT,
+    partition_name TEXT,
+    total_seq_scan BIGINT,
+    total_seq_tup_read BIGINT,
+    total_idx_scan BIGINT,
+    total_idx_tup_fetch BIGINT,
+    total_n_tup_ins BIGINT,
+    total_n_tup_upd BIGINT,
+    total_n_tup_del BIGINT,
+    total_n_tup_hot_upd BIGINT,
+    total_n_live_tup BIGINT,
+    total_n_dead_tup BIGINT,
+    total_n_mod_since_analyze BIGINT
+) DISTRIBUTED BY (root_schema, root_table) ON COMMIT DELETE ROWS;
+
+
+
 CREATE OR REPLACE FUNCTION dbatools.gather_partition_stats_detail()
 RETURNS void AS $$
 DECLARE
