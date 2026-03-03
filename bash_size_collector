@@ -1,0 +1,67 @@
+#!/bin/bash
+
+# Параметры подключения к БД (можно вынести в переменные окружения)
+DB_NAME="your_db"
+DB_HOST="your_host"
+DB_PORT="5432"
+DB_USER="your_user"
+export PGPASSWORD="your_password"
+
+# Количество параллельных процессов
+PARALLEL_JOBS=8
+
+# Временный файл со списком OID схем
+SCHEMA_LIST="schemas.txt"
+RESULT_TABLE="public.schema_sizes"
+
+# 1. Получить список OID схем (исключая системные)
+psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -Atc "
+    SELECT oid
+    FROM pg_namespace
+    WHERE nspname NOT LIKE 'pg\_%'
+      AND nspname != 'information_schema'
+      AND nspname NOT LIKE 'gp\_%'
+      AND nspname != 'toast';
+" > "$SCHEMA_LIST"
+
+if [[ ! -s "$SCHEMA_LIST" ]]; then
+    echo "Нет схем для обработки или ошибка подключения."
+    exit 1
+fi
+
+echo "Найденo $(wc -l < "$SCHEMA_LIST") схем. Запуск $PARALLEL_JOBS параллельных процессов..."
+
+# 2. Функция обработки одной схемы (будет вызываться xargs)
+process_schema() {
+    local oid="$1"
+    # Выполняем исходный запрос с подстановкой OID и вставляем результат в таблицу
+    psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "
+        INSERT INTO $RESULT_TABLE (relnamespace, relname, byte_size, readable_size)
+        SELECT
+            pc.relnamespace,
+            pc.relname,
+            SUM(pg_total_relation_size(pc.oid)) AS byte_size,
+            pg_size_pretty(SUM(pg_total_relation_size(pc.oid))) AS readable_size
+        FROM gp_dist_random('pg_class') pc
+        WHERE pc.relnamespace = $oid
+        GROUP BY pc.relnamespace, pc.relname
+        ORDER BY byte_size DESC;
+    " > /dev/null 2>&1   # подавляем вывод, можно добавить логирование ошибок
+
+    # Проверка кода возврата (необязательно)
+    if [[ $? -eq 0 ]]; then
+        echo "Схема $oid обработана успешно"
+    else
+        echo "Ошибка при обработке схемы $oid" >&2
+    fi
+}
+
+export -f process_schema
+export DB_NAME DB_HOST DB_PORT DB_USER PGPASSWORD RESULT_TABLE
+
+# 3. Запуск параллельной обработки через xargs
+cat "$SCHEMA_LIST" | xargs -n 1 -P "$PARALLEL_JOBS" -I {} bash -c 'process_schema "$@"' _ {}
+
+# 4. Очистка
+rm -f "$SCHEMA_LIST"
+echo "Готово."
