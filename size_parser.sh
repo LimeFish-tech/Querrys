@@ -1,29 +1,32 @@
 #!/bin/bash
-# managed_size_collector.sh
+# process_table_sizes.sh
 # Обработка собранных данных о размерах таблиц: разделение на партиции и непартицированные,
 # вычисление дельт между последним и предыдущим сбором.
 
 set -e  # прерывать при ошибке
 
-# Параметры подключения (можно переопределить через переменные окружения, при желании)
-PGHOST=""
-PGPORT="5432"
-PGDATABASE="your_db"
-PGUSER=""
-export PGPASSWORD=""  # лучше использовать .pgpass
+# Параметры подключения (можно переопределить через переменные окружения)
+: ${PGHOST:=localhost}
+: ${PGPORT:=5432}
+: ${PGDATABASE:=your_db}
+: ${PGUSER:=your_user}
+export PGPASSWORD="${PGPASSWORD:-your_password}"  # лучше использовать .pgpass
 
 # Функция для выполнения SQL (вывод без форматирования, останов при ошибке)
 exec_psql() {
     psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" -v ON_ERROR_STOP=1 -Atc "$1"
 }
 
+#echo "=== Создание схемы dbatools (если не существует) ==="
+#exec_psql "CREATE SCHEMA IF NOT EXISTS dbatools;"
+
 echo "=== Создание таблиц и функции (если не существуют) ==="
 exec_psql "
--- Вспомогательная функция для проверки, является ли таблица партицией
+-- Вспомогательная функция для проверки, является ли таблица партицией (через наследование)
 CREATE OR REPLACE FUNCTION dbatools.is_partition(reloid oid)
 RETURNS boolean AS \$\$
 BEGIN
-    RETURN EXISTS (SELECT 1 FROM pg_partitions WHERE partitionoid = reloid);
+    RETURN EXISTS (SELECT 1 FROM pg_inherits WHERE inhrelid = reloid);
 END;
 \$\$ LANGUAGE plpgsql STABLE;
 
@@ -89,7 +92,7 @@ CREATE INDEX IF NOT EXISTS idx_nonpart_deltas_time ON dbatools.non_partitioned_d
 # Определяем последнее время сбора
 current_time=$(exec_psql "SELECT MAX(collection_time) FROM dbatools.table_sizes_heap;")
 if [[ -z "$current_time" || "$current_time" == "NULL" ]]; then
-    echo "Ошибка: нет данных в table_sizes_heap."
+    echo "Ошибка: нет данных в dbatools.table_sizes_heap."
     exit 1
 fi
 echo "Последнее время сбора: $current_time"
@@ -116,7 +119,7 @@ SELECT
 FROM dbatools.table_sizes_heap s
 JOIN pg_class c ON c.relnamespace = s.relnamespace AND c.relname = s.relname
 JOIN pg_namespace n ON n.oid = s.relnamespace
-JOIN pg_partitions p ON p.partitionoid = c.oid
+JOIN pg_partitions p ON p.schemaname = n.nspname AND p.partitionname = c.relname
 WHERE s.collection_time = '$current_time';
 "
 
@@ -134,9 +137,9 @@ SELECT
 FROM dbatools.table_sizes_heap s
 JOIN pg_class c ON c.relnamespace = s.relnamespace AND c.relname = s.relname
 JOIN pg_namespace n ON n.oid = s.relnamespace
-LEFT JOIN pg_partitions p ON p.partitionoid = c.oid
+LEFT JOIN pg_partitions p ON p.schemaname = n.nspname AND p.partitionname = c.relname
 WHERE s.collection_time = '$current_time'
-  AND p.partitionoid IS NULL;   -- исключаем партиции
+  AND p.partitionname IS NULL;   -- исключаем партиции (те, для которых нашлась запись в pg_partitions)
 "
 
 echo "=== Вычисление дельт для непартицированных таблиц ==="
