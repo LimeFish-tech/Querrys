@@ -3,7 +3,7 @@
 # Обработка собранных данных о размерах таблиц: разделение на партиции и непартицированные,
 # вычисление дельт между последним и предыдущим сбором.
 
-set -e  # прерывать при ошибке
+set -e
 
 # Параметры подключения (можно переопределить через переменные окружения)
 : ${PGHOST:=localhost}
@@ -17,19 +17,11 @@ exec_psql() {
     psql -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" -v ON_ERROR_STOP=1 -Atc "$1"
 }
 
-#echo "=== Создание схемы dbatools (если не существует) ==="
-#exec_psql "CREATE SCHEMA IF NOT EXISTS dbatools;"
+echo "=== Создание схемы dbatools (если не существует) ==="
+exec_psql "CREATE SCHEMA IF NOT EXISTS dbatools;"
 
 echo "=== Создание таблиц и функции (если не существуют) ==="
 exec_psql "
--- Вспомогательная функция для проверки, является ли таблица партицией (через наследование)
-CREATE OR REPLACE FUNCTION dbatools.is_partition(reloid oid)
-RETURNS boolean AS \$\$
-BEGIN
-    RETURN EXISTS (SELECT 1 FROM pg_inherits WHERE inhrelid = reloid);
-END;
-\$\$ LANGUAGE plpgsql STABLE;
-
 -- Таблица для истории партиций
 CREATE TABLE IF NOT EXISTS dbatools.partition_sizes_history (
     collection_time timestamptz,
@@ -110,16 +102,17 @@ INSERT INTO dbatools.partition_sizes_history (collection_time, schema_oid, schem
 SELECT
     s.collection_time,
     s.relnamespace,
-    n.nspname,
-    p.tablename AS parent_relname,
-    p.partitionname AS partition_name,
+    n.nspname AS schema_name,
+    parent.relname AS parent_relname,
+    c.relname AS partition_name,
     c.oid AS partition_oid,
     s.byte_size,
     s.readable_size
 FROM dbatools.table_sizes_heap s
 JOIN pg_class c ON c.relnamespace = s.relnamespace AND c.relname = s.relname
 JOIN pg_namespace n ON n.oid = s.relnamespace
-JOIN pg_partitions p ON p.schemaname = n.nspname AND p.partitionname = c.relname
+JOIN pg_inherits i ON i.inhrelid = c.oid   -- таблица является партицией (наследником)
+JOIN pg_class parent ON parent.oid = i.inhparent   -- родительская таблица
 WHERE s.collection_time = '$current_time';
 "
 
@@ -137,9 +130,9 @@ SELECT
 FROM dbatools.table_sizes_heap s
 JOIN pg_class c ON c.relnamespace = s.relnamespace AND c.relname = s.relname
 JOIN pg_namespace n ON n.oid = s.relnamespace
-LEFT JOIN pg_partitions p ON p.schemaname = n.nspname AND p.partitionname = c.relname
+LEFT JOIN pg_inherits i ON i.inhrelid = c.oid
 WHERE s.collection_time = '$current_time'
-  AND p.partitionname IS NULL;   -- исключаем партиции (те, для которых нашлась запись в pg_partitions)
+  AND i.inhrelid IS NULL;   -- исключаем партиции
 "
 
 echo "=== Вычисление дельт для непартицированных таблиц ==="
