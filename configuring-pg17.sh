@@ -159,3 +159,58 @@ echo "=== ГОТОВО! ==="
 echo "PostgreSQL 17 установлен и настроен для максимальной производительности."
 echo "Не забудьте настроить файрвол (firewalld) и сменить пароль пользователя postgres:"
 echo "sudo -u postgres psql -c \"ALTER USER postgres PASSWORD 'Новый_Сложный_Пароль';\""
+
+
+
+
+
+
+
+
+
+ALTER SYSTEM SET listen_addresses TO '*';
+ALTER SYSTEM SET port TO 5432;
+ALTER SYSTEM SET max_connections TO 300;
+
+-- Параметры памяти (требуют перезапуска)
+ALTER SYSTEM SET shared_buffers TO '8GB';
+ALTER SYSTEM SET huge_pages TO 'try';
+ALTER SYSTEM SET work_mem TO '64MB';
+ALTER SYSTEM SET maintenance_work_mem TO '2GB';
+ALTER SYSTEM SET effective_cache_size TO '24GB';
+
+-- Настройки WAL (некоторые требуют перезапуска)
+ALTER SYSTEM SET wal_level TO 'replica';               -- требует перезапуска
+ALTER SYSTEM SET fsync TO 'on';
+ALTER SYSTEM SET synchronous_commit TO 'off';
+ALTER SYSTEM SET wal_sync_method TO 'fsync';
+ALTER SYSTEM SET full_page_writes TO 'on';
+ALTER SYSTEM SET wal_buffers TO '16MB';                -- требует перезапуска
+ALTER SYSTEM SET wal_writer_delay TO '200ms';
+ALTER SYSTEM SET wal_writer_flush_after TO '1MB';
+ALTER SYSTEM SET checkpoint_timeout TO '15min';
+ALTER SYSTEM SET max_wal_size TO '64GB';
+ALTER SYSTEM SET min_wal_size TO '16GB';
+ALTER SYSTEM SET checkpoint_completion_target TO 0.9;
+
+-- Планировщик и оптимизатор
+ALTER SYSTEM SET random_page_cost TO 1.1;
+ALTER SYSTEM SET effective_io_concurrency TO 300;
+ALTER SYSTEM SET default_statistics_target TO 500;
+
+-- Параллельные запросы (требуют перезапуска для изменения количества процессов)
+ALTER SYSTEM SET max_worker_processes TO 16;           -- требует перезапуска
+ALTER SYSTEM SET max_parallel_workers_per_gather TO 4;
+ALTER SYSTEM SET max_parallel_workers TO 8;
+ALTER SYSTEM SET parallel_leader_participation TO 'on';
+
+-- Автовакуум
+ALTER SYSTEM SET autovacuum TO 'on';
+ALTER SYSTEM SET autovacuum_max_workers TO 5;
+ALTER SYSTEM SET autovacuum_naptime TO '30s';
+ALTER SYSTEM SET autovacuum_vacuum_scale_factor TO 0.05;
+ALTER SYSTEM SET autovacuum_vacuum_threshold TO 500;
+ALTER SYSTEM SET autovacuum_analyze_scale_factor TO 0.02;
+ALTER SYSTEM SET autovacuum_analyze_threshold TO 250;
+ALTER SYSTEM SET autovacuum_vacuum_cost_delay TO '5ms';
+ALTER SYSTEM SET autovacuum_vacuum_cost_limit TO 1000;
