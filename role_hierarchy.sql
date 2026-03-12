@@ -1,13 +1,12 @@
-WITH RECURSIVE members AS (
-    SELECT oid, rolname
-    FROM pg_roles
-    WHERE rolname = 'readers'
+WITH RECURSIVE cte AS (
+   SELECT oid, 0 AS steps, true AS inherit_option
+   FROM   pg_roles
+   WHERE  rolname = 'maxwell'
 
-    UNION ALL
-
-    SELECT r.oid, r.rolname
-    FROM members m
-    JOIN pg_auth_members a ON a.roleid = m.oid
-    JOIN pg_roles r ON a.member = r.oid
-)
-SELECT rolname FROM members WHERE oid <> (SELECT oid FROM pg_roles WHERE rolname = 'readers');
+   UNION ALL
+   SELECT m.roleid, c.steps + 1, c.inherit_option AND m.inherit_option
+   FROM   cte c
+   JOIN   pg_auth_members m ON m.member = c.oid
+   )
+SELECT oid, oid::regrole::text AS rolename, steps, inherit_option
+FROM   cte;
